@@ -8,6 +8,7 @@ __pycache__/
 results/*.png
 results/*.csv
 results/*.jsonl
+results/*.log
 
 # Local embedded cache of the benign corpus. The committed seed
 # (data/benign_memories.seed.jsonl) is text-only; running

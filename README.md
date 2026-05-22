@@ -57,6 +57,31 @@ Expected baseline (gpt-4o-mini, the committed seed corpus):
 
 T1/T2 not reaching 5/5 is the *expected* stealth-vs-ASR variance the §2.1 sweep is designed to characterize, not a bug. Note also that small score differences vs. the cached embedded corpus are normal — embedder outputs are deterministic per model but can vary slightly across builds.
 
+## Run Experiment 1 (plan §2.1 – §2.3)
+
+Three steps — payload seeds, sweep, tabulate. Steps 1 and 2 hit the OpenAI API; step 3 is offline.
+
+```bash
+# §2.1 — (re)build the 10 paired malicious/benign seeds (committed; only re-run if you change payloads)
+python data/build_exp1_seeds.py
+
+# §2.2 — sweep N=20 episodes × {malicious, benign} per pair = 400 episodes (~18 min, resumable)
+python experiments/exp1_handcrafted.py --n 20
+
+# §2.3 — render results/exp1_table.md from results/exp1_summary.json
+python experiments/tabulate_exp1.py
+```
+
+Headline numbers from the committed run (gpt-4o-mini, N=20):
+
+| Stealth     | Survivors | Retrieval@5 | ASR judge (mal) | ASR judge (benign) |
+|-------------|-----------|-------------|------------------|---------------------|
+| A overt     | 1/3       | 43%         | 33%              | 0%                  |
+| B narrative | 3/4       | 59%         | 51%              | 0%                  |
+| C indirect  | 1/3       | 38%         | 28%              | 0%                  |
+
+Benign-control ASR = 0% across all 10 pairs (judge passes the §2.2 sanity gate). Per-pair detail and non-survivor flags live in `results/exp1_table.md`.
+
 ## Repo layout
 
 ```
@@ -65,16 +90,22 @@ env/
   agent.py           # gpt-4o-mini wrapper (§1.4)
   tasks.py           # T1-T4 target tasks (§1.5)
   episode.py         # two-phase rollout (§1.6)
-attacks/handcrafted.py   # 10-payload sweep (§2.1, in progress)
-rl/                       # PPO scaffolding (§3.x, in progress)
+  judge.py           # strict-JSON LLM judge (§2.2)
+attacks/handcrafted.py   # 10 hand-crafted payloads at stealth A/B/C (§2.1)
+rl/                       # PPO scaffolding (§3.x, not yet started)
 experiments/
-  smoke_test.py      # §1.7 pipeline gate
-  exp1_handcrafted.py    # §2 (in progress)
-  exp3_sparse_failure.py # §3 (in progress)
+  smoke_test.py          # §1.7 pipeline gate
+  exp1_handcrafted.py    # §2.2 sweep driver (resumable)
+  tabulate_exp1.py       # §2.3 markdown-table renderer
+  exp3_sparse_failure.py # §3 (not yet started)
 data/
   build_benign_corpus.py     # §1.2 generator
   benign_memories.seed.jsonl # committed text-only seed (re-embed at load)
-results/                  # logs/figures; *.jsonl/.csv/.png all gitignored
+  build_exp1_seeds.py        # §2.1 mask-and-rephrase paired-seed builder
+  exp1_seeds.jsonl           # committed 10 paired malicious/benign seeds
+results/                  # logs/figures; *.jsonl/.csv/.png/.log all gitignored
+  exp1_summary.json       # per-pair aggregates from §2.2 (committed)
+  exp1_table.md           # §2.3 milestone-report table (committed)
 plan.md                   # authoritative milestone plan (read this first)
 CLAUDE.md                 # conventions / commands / scope guardrails
 ```

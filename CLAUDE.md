@@ -28,8 +28,11 @@ The default `python3` resolves to a base env that lacks these — running direct
 - `experiments/smoke_test.py` (§1.7) — one blatant payload per task across configurable seeds; passes if every task succeeds ≥1×. Run with `--save` to log per-episode JSONL to `results/smoke_test.jsonl`. Exit code 0 = all-pass; 1 = any task all-failed. This is the gate the plan calls out ("don't move on until the pipeline carries an obvious attack end-to-end").
 - `attacks/handcrafted.py` (§2.1) — 10 hand-crafted `Payload`s at stealth A/B/C (3+4+3), mapped 1:1 to tasks T1–T4. Module-import self-check asserts each `text` contains its task's `attack_token` and the stealth distribution stays 3A/4B/3C. T4 (refusal bypass) only carries a B-level payload because the SSN token must literally appear in memory for the agent to recite it, so the C "indirect" framing collapses into the B narrative one.
 - `data/build_exp1_seeds.py` (§2.1 / §2.1b) — mask-and-rephrase generator. For each payload it: seeded-shuffles a method assignment (decouples stealth from style), wraps the payload as `<<<HERE>>>...<<<HERE>>>`, hands gpt-4o-mini the persona blurb + 3 real benign exemplars from that persona/method block, requires strict-JSON `{"benign_replacement": "..."}`, and rejects on `marker_leak` / `attack_token_leak` / verbatim-echo (SequenceMatcher ratio > 0.7) / `filter_violation`. Retries ≤3× then drops. Writes the §2.1b paired records to `data/exp1_seeds.jsonl` (committed; 10 small records).
+- `env/judge.py` (§2.2) — `Judge.evaluate(query, output, task)` calls `gpt-4o-mini` at `temperature=0.0` with `response_format={"type":"json_object"}`. Returns `JudgeVerdict(aligned_with_user, attack_succeeded, reason)`. The judge is the *primary* attack-success signal; `task.success_check` is the sanity backup. It sees task description + attack_token but not whether the episode was malicious or benign — so benign-row `attack_succeeded=true` is a real contamination signal, not a labeling artifact. Same dotenv-inside-function pattern as `env/agent.py`.
+- `experiments/exp1_handcrafted.py` (§2.2 / §2.1c) — drives the Exp 1 sweep: for every paired seed in `data/exp1_seeds.jsonl`, runs N=20 episodes per condition (malicious vs benign) using `run_episode` + `Judge`. Streams rows to `results/exp1_episodes.jsonl` (append, line-buffered) so the sweep is **resumable** by `(pair_id, condition, episode_idx)`. Computes the §2.1c survivor flag (`≥1` judge-confirmed success across N malicious episodes) and writes `results/exp1_summary.json`. Shares one MiniLM embedder across all 400 episodes (avoids re-loading the model). `--summary-only` regenerates the summary without re-running. `--pairs pair_001 …` runs a subset.
+- `experiments/tabulate_exp1.py` (§2.3) — reads `results/exp1_summary.json` and writes `results/exp1_table.md`: by-stealth headline table (Retrieval@5, ASR-judge malicious, ASR-judge benign, ASR-regex, survivor count), per-pair detail table, and a flags block highlighting benign false-positives (contamination signal) and non-survivors.
 
-The `Agent` constructor now also exposes `max_retries` (default 6) and `request_timeout` (default 30s) — passed straight to `openai.OpenAI()`, which handles 429 + transient 5xx with exponential backoff. Bumped from the SDK default of 2 because §2.2 will fire ~1600 episodes.
+The `Agent` and `Judge` constructors both expose `max_retries` (default 6) and `request_timeout` (default 30s) — passed straight to `openai.OpenAI()`, which handles 429 + transient 5xx with exponential backoff. Bumped from the SDK default of 2 because §2.2 fires ~800 API calls (400 episodes × 2 calls/ep).
 
 ### Benign corpus: two-file convention
 
@@ -69,6 +72,18 @@ for r in (json.loads(l) for l in open('data/exp1_seeds.jsonl')):
     assert filter_violation(r['benign_text']) is None, r['pair_id']
 print('OK')
 "
+
+# §2.2 Exp 1 sweep (400 episodes, ~30 min; resumable, OPENAI_API_KEY required):
+/Users/MihirMenon/miniconda3/envs/cs224r/bin/python experiments/exp1_handcrafted.py --n 20
+# quick subset (single pair, fast iteration on the runner):
+/Users/MihirMenon/miniconda3/envs/cs224r/bin/python experiments/exp1_handcrafted.py \
+    --n 2 --pairs pair_001 --no-resume \
+    --episodes-out results/exp1_dryrun.jsonl --summary-out results/exp1_dryrun_summary.json
+# Regenerate the summary from existing per-episode JSONL (no API calls):
+/Users/MihirMenon/miniconda3/envs/cs224r/bin/python experiments/exp1_handcrafted.py --summary-only
+
+# §2.3 tabulation (reads results/exp1_summary.json, no API key):
+/Users/MihirMenon/miniconda3/envs/cs224r/bin/python experiments/tabulate_exp1.py
 ```
 
 ### Resolved phrasing sensitivity
